@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller build & distribution folders
+build/
+dist/
+
+# Release binaries (upload these to GitHub Releases instead of committing to git)
+releases/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE & OS files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
