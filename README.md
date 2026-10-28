@@ -462,6 +462,14 @@ Please avoid including passwords, private credentials or sensitive camera footag
 
 ---
 
+## ⚖️ Disclaimer
+
+HikView is an independent, third-party application and is **not affiliated with, endorsed by, sponsored by, or officially supported by Hikvision** or any other camera or NVR manufacturer.
+
+All product names, trademarks and registered trademarks mentioned in this project remain the property of their respective owners. References to manufacturers and products are provided solely for identification and compatibility purposes.
+
+---
+
 ## 📄 License & Credits
 
 **HikView v1.0.0**
