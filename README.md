@@ -492,4 +492,21 @@ Development of HikView has been supported by AI-assisted coding and development 
 
 **Made for Windows 10 & 11**
 
+---
+
+## ☕ Support the Project
+
+I developed Hikview as a lightweight camera viewer for my own NVR.  Since adding support for a wider range of cameras, I decided to share it so anyone can make use of it.
+
+If you enjoy using Hikview and would like to offer support, you're very welcome to buy me a coffee! It's entirely optional, but always appreciated.
+
+<a href="https://buymeacoffee.com/libbylamarr">
+  <img
+    src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"
+    alt="Buy Me a Coffee"
+    width="180">
+</a>
+
+Thank you for calling by :)
+
 </div>
