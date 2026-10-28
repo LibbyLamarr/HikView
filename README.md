@@ -507,6 +507,5 @@ If you enjoy using Hikview and would like to offer support, you're very welcome 
     width="180">
 </a>
 
-Thank you for calling by :)
 
 </div>
