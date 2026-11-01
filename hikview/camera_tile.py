@@ -5,7 +5,7 @@ camera assignment per view slot, context menu actions, and double-click maximize
 """
 
 from typing import List, Optional, Tuple
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPoint, QTimer, QMimeData
 from PyQt6.QtGui import (
     QImage,
     QPainter,
@@ -14,8 +14,14 @@ from PyQt6.QtGui import (
     QPen,
     QAction,
     QMouseEvent,
+    QDrag,
+    QPixmap,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDragLeaveEvent,
+    QDropEvent,
 )
-from PyQt6.QtWidgets import QWidget, QMenu
+from PyQt6.QtWidgets import QWidget, QMenu, QApplication
 
 
 class CameraTileWidget(QWidget):
@@ -33,6 +39,7 @@ class CameraTileWidget(QWidget):
     double_clicked = pyqtSignal(int)                   # slot_index
     selected = pyqtSignal(int)                         # slot_index
     camera_assigned = pyqtSignal(int, int)             # (slot_index, channel_id) where 0 = None
+    slot_swapped = pyqtSignal(int, int)                # (source_slot_index, target_slot_index)
     layout_mode_requested = pyqtSignal(int)            # mode: 1 (Single), 4 (Quad), 13 (Focus)
     promote_to_focus_requested = pyqtSignal(int)       # slot_index (move this side slot to the large view in 1+3 mode)
     stream_type_requested = pyqtSignal(int, str)       # (channel_id, "main" | "sub")
@@ -82,6 +89,11 @@ class CameraTileWidget(QWidget):
         self._zoom_btn_rect = QRect()
         self._snap_btn_rect = QRect()
         self._snap_flash_active: bool = False
+
+        # Drag and drop camera swapping state
+        self.setAcceptDrops(True)
+        self._drag_start_pos: Optional[QPoint] = None
+        self._is_drop_target: bool = False
 
         # Digital Zoom state
         self._zoom_selecting: bool = False             # True when user clicked magnifier and is ready to drag a box
@@ -233,6 +245,10 @@ class CameraTileWidget(QWidget):
                 self.update()
                 return
 
+            # 5. Normal mode: store press position to detect potential camera tile drag
+            if not self._zoom_selecting:
+                self._drag_start_pos = pos
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -245,9 +261,24 @@ class CameraTileWidget(QWidget):
             self.update()
             return
 
+        # Check for Drag-and-Drop start if user is holding LeftButton
+        if (
+            event.buttons() & Qt.MouseButton.LeftButton
+            and self._drag_start_pos is not None
+            and not self._zoom_selecting
+            and self.current_layout_mode != 1
+        ):
+            dist = (event.pos() - self._drag_start_pos).manhattanLength()
+            if dist >= QApplication.startDragDistance():
+                start_pos = self._drag_start_pos
+                self._drag_start_pos = None
+                self._start_camera_drag(start_pos)
+                return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        self._drag_start_pos = None
         if event.button() == Qt.MouseButton.LeftButton and self._zoom_dragging:
             self._zoom_dragging = False
             self._zoom_drag_current = event.pos()
@@ -289,6 +320,99 @@ class CameraTileWidget(QWidget):
                 return
             self.double_clicked.emit(self.slot_index)
         super().mouseDoubleClickEvent(event)
+
+    def _start_camera_drag(self, hotspot: QPoint):
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData("application/x-hikview-slot", str(self.slot_index).encode("utf-8"))
+        drag.setMimeData(mime)
+
+        # Render a translucent thumbnail preview of the camera tile being dragged
+        preview_w = min(160, max(80, self.width() // 2))
+        preview_h = min(100, max(50, self.height() // 2))
+        pixmap = QPixmap(preview_w, preview_h)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setOpacity(0.85)
+
+        # Draw tile representation
+        p.setBrush(QColor("#1b212e"))
+        p.setPen(QPen(QColor("#e03e3e"), 2))
+        p.drawRoundedRect(1, 1, preview_w - 2, preview_h - 2, 4, 4)
+
+        if self._current_image is not None and not self._current_image.isNull():
+            scaled = self._current_image.scaled(
+                preview_w - 6, preview_h - 6,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            dx = (preview_w - scaled.width()) // 2
+            dy = (preview_h - scaled.height()) // 2
+            p.drawImage(dx, dy, scaled)
+
+        p.setBrush(QColor(0, 0, 0, 160))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(4, 4, preview_w - 8, 18, 2, 2)
+
+        font = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        p.setFont(font)
+        p.setPen(QColor("#ffffff"))
+        lbl = f"CH{self.channel_id:02d}" if self.channel_id > 0 else f"Slot {self.slot_index + 1}"
+        p.drawText(QRect(4, 4, preview_w - 8, 18), Qt.AlignmentFlag.AlignCenter, lbl)
+        p.end()
+
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(QPoint(preview_w // 2, preview_h // 2))
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasFormat("application/x-hikview-slot") and self.current_layout_mode != 1:
+            try:
+                src_slot = int(bytes(event.mimeData().data("application/x-hikview-slot")).decode("utf-8"))
+                if src_slot != self.slot_index:
+                    event.acceptProposedAction()
+                    self._is_drop_target = True
+                    self.update()
+                    return
+            except Exception:
+                pass
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent):
+        if event.mimeData().hasFormat("application/x-hikview-slot") and self.current_layout_mode != 1:
+            try:
+                src_slot = int(bytes(event.mimeData().data("application/x-hikview-slot")).decode("utf-8"))
+                if src_slot != self.slot_index:
+                    event.acceptProposedAction()
+                    if not self._is_drop_target:
+                        self._is_drop_target = True
+                        self.update()
+                    return
+            except Exception:
+                pass
+        event.ignore()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent):
+        if self._is_drop_target:
+            self._is_drop_target = False
+            self.update()
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent):
+        self._is_drop_target = False
+        self.update()
+        if event.mimeData().hasFormat("application/x-hikview-slot") and self.current_layout_mode != 1:
+            try:
+                src_slot = int(bytes(event.mimeData().data("application/x-hikview-slot")).decode("utf-8"))
+                if src_slot != self.slot_index:
+                    event.acceptProposedAction()
+                    self.slot_swapped.emit(src_slot, self.slot_index)
+                    return
+            except Exception:
+                pass
+        event.ignore()
 
     def _menu_stylesheet(self) -> str:
         return """
@@ -446,12 +570,18 @@ class CameraTileWidget(QWidget):
             self._zoom_btn_rect = QRect()
             self._snap_btn_rect = QRect()
 
-        # Draw minimal, low-prominence 1px border around the tile
-        border_color = QColor(145, 42, 42, 150) if self.is_selected else QColor("#14171f")
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        pen = QPen(border_color, 1)
-        painter.setPen(pen)
-        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        # Draw minimal, low-prominence 1px border around the tile (or prominent highlight when drag-hovered)
+        if self._is_drop_target:
+            painter.setBrush(QColor(224, 62, 62, 35))
+            pen = QPen(QColor("#e03e3e"), 2, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.drawRect(rect.adjusted(1, 1, -2, -2))
+        else:
+            border_color = QColor(145, 42, 42, 150) if self.is_selected else QColor("#14171f")
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            pen = QPen(border_color, 1)
+            painter.setPen(pen)
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
     def _draw_placeholder(self, painter: QPainter, rect: QRect):
         """Draw status info only when an assigned camera is connecting or has an error."""

@@ -47,6 +47,10 @@ from .settings_dialog import SettingsDialog
 
 def create_app_icon() -> QIcon:
     """Create a sleek custom vector-style icon for the window and taskbar."""
+    ico_file = Path(__file__).resolve().parent.parent / "app_icon.ico"
+    if ico_file.is_file():
+        return QIcon(str(ico_file))
+
     pix = QPixmap(64, 64)
     pix.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pix)
@@ -491,6 +495,7 @@ class MainWindow(QMainWindow):
             tile.selected.connect(self._on_tile_selected)
             tile.double_clicked.connect(self._on_tile_double_clicked)
             tile.camera_assigned.connect(self.assign_camera_to_slot)
+            tile.slot_swapped.connect(self.swap_slots)
             tile.layout_mode_requested.connect(self.set_layout_mode)
             tile.promote_to_focus_requested.connect(self.promote_side_slot_to_large_focus)
             tile.stream_type_requested.connect(self._on_tile_stream_type_requested)
@@ -572,6 +577,32 @@ class MainWindow(QMainWindow):
                     tile.set_status("disconnected", "Ready")
             else:
                 tile.set_assigned_camera(0, "")
+
+    def swap_slots(self, src_slot: int, dst_slot: int):
+        """
+        Swap the camera assignments between two slots (e.g. via drag-and-drop).
+        Operates on focus_slot_assignments if in Focus mode, or slot_assignments otherwise.
+        """
+        if src_slot == dst_slot or src_slot not in self.tiles or dst_slot not in self.tiles:
+            return
+
+        active_list = self._active_slot_list()
+        src_cid = active_list[src_slot]
+        dst_cid = active_list[dst_slot]
+
+        active_list[src_slot], active_list[dst_slot] = active_list[dst_slot], active_list[src_slot]
+        self.config.save()
+
+        self._refresh_tiles_from_active_slot_list()
+        self._on_tile_selected(dst_slot)
+
+        if self.is_streaming:
+            self._sync_workers_with_slots()
+            self._adjust_streams_for_layout()
+
+        src_name = f"CH{src_cid:02d}" if src_cid > 0 else "Empty"
+        dst_name = f"CH{dst_cid:02d}" if dst_cid > 0 else "Empty"
+        self.status_bar.showMessage(f"Swapped View {src_slot + 1} ({src_name}) with View {dst_slot + 1} ({dst_name})", 4000)
 
     def promote_side_slot_to_large_focus(self, side_slot_index: int):
         """

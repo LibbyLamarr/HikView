@@ -3,14 +3,15 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
-$Version = "v1.0.0"
+$Version = "v1.0.1"
 $DistAppDir = Join-Path $ProjectRoot "dist\HikView"
 $ReleasesDir = Join-Path $ProjectRoot "releases"
+$AppIconPath = Join-Path $ProjectRoot "app_icon.ico"
 $CSC = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
 if (-not (Test-Path $DistAppDir)) {
     Write-Host "Building HikView.exe with PyInstaller first..." -ForegroundColor Cyan
-    pyinstaller --noconfirm --clean --windowed --name "HikView" main.py
+    pyinstaller --noconfirm --clean --windowed --icon "app_icon.ico" --add-data "app_icon.ico;." --name "HikView" main.py
 }
 
 if (-not (Test-Path $ReleasesDir)) {
@@ -27,7 +28,7 @@ if (Test-Path $UninstallerPath) {
     Remove-Item $UninstallerPath -Force
 }
 
-# 2. Create Portable ZIP: releases\HikView-Portable-v1.0.0.zip
+# 2. Create Portable ZIP: releases\HikView-Portable-v1.0.1.zip
 $PortableZip = Join-Path $ReleasesDir "HikView-Portable-$Version.zip"
 if (Test-Path $PortableZip) {
     Remove-Item $PortableZip -Force
@@ -38,9 +39,10 @@ Write-Host "Portable ZIP created: $PortableZip" -ForegroundColor Green
 
 # 3. Compile Uninstaller into dist\HikView\Uninstall-HikView.exe
 Write-Host "Compiling Uninstall-HikView.exe ..." -ForegroundColor Cyan
-& $CSC /nologo /target:winexe /out:$UninstallerPath `
+& $CSC /nologo /target:winexe "/win32icon:$AppIconPath" "/out:$UninstallerPath" `
     /r:System.dll /r:System.Windows.Forms.dll `
     (Join-Path $ProjectRoot "installer\Uninstaller.cs")
+Start-Sleep -Milliseconds 1200
 
 # 4. Create temporary payload ZIP (includes Uninstall-HikView.exe) for the Setup installer
 $PayloadZip = Join-Path $ReleasesDir "_payload_temp.zip"
@@ -48,15 +50,25 @@ if (Test-Path $PayloadZip) {
     Remove-Item $PayloadZip -Force
 }
 Write-Host "Packaging installer payload ..." -ForegroundColor Cyan
-Compress-Archive -Path $DistAppDir -DestinationPath $PayloadZip -CompressionLevel Optimal
+python -c @"
+import zipfile, os
+dist_dir = r'$DistAppDir'
+payload_path = r'$PayloadZip'
+with zipfile.ZipFile(payload_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk(dist_dir):
+        for file in files:
+            full = os.path.join(root, file)
+            rel = os.path.relpath(full, dist_dir)
+            zf.write(full, rel)
+"@
 
-# 5. Compile HikView-Setup-v1.0.0.exe with embedded payload
+# 5. Compile HikView-Setup-v1.0.1.exe with embedded payload
 $SetupExe = Join-Path $ReleasesDir "HikView-Setup-$Version.exe"
 if (Test-Path $SetupExe) {
     Remove-Item $SetupExe -Force
 }
 Write-Host "Compiling Windows Setup Wizard: $SetupExe ..." -ForegroundColor Cyan
-& $CSC /nologo /target:winexe /out:$SetupExe `
+& $CSC /nologo /target:winexe "/win32icon:$AppIconPath" "/out:$SetupExe" `
     /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
     /resource:"$PayloadZip,HikViewPayload.zip" `
@@ -65,6 +77,9 @@ Write-Host "Compiling Windows Setup Wizard: $SetupExe ..." -ForegroundColor Cyan
 # Clean up temporary payload zip and remove Uninstaller from portable dist folder
 if (Test-Path $PayloadZip) {
     Remove-Item $PayloadZip -Force
+}
+if (Test-Path $UninstallerPath) {
+    Remove-Item $UninstallerPath -Force
 }
 
 Write-Host ""

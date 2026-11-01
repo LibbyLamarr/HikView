@@ -840,7 +840,7 @@ class SettingsDialog(QDialog):
 
         lbl_header = QLabel(
             "<span style='font-size: 16px; font-weight: 700; color: #ffffff;'>HikView</span> "
-            "<span style='font-size: 13px; font-weight: 600; color: #e03e3e; padding-left: 6px;'>V1.0.0</span>"
+            "<span style='font-size: 13px; font-weight: 600; color: #e03e3e; padding-left: 6px;'>V1.0.1</span>"
         )
         lbl_header.setTextFormat(Qt.TextFormat.RichText)
         app_layout.addWidget(lbl_header)
@@ -860,7 +860,7 @@ class SettingsDialog(QDialog):
         meta_form.setContentsMargins(0, 6, 0, 0)
         meta_form.setSpacing(6)
 
-        lbl_version = QLabel("V1.0.0")
+        lbl_version = QLabel("V1.0.1")
         lbl_version.setStyleSheet("color: #ffffff; font-weight: 600;")
         meta_form.addRow("Version:", lbl_version)
 
