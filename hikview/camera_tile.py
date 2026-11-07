@@ -47,6 +47,41 @@ class CameraTileWidget(QWidget):
     disconnect_requested = pyqtSignal(int)             # channel_id
     snapshot_requested = pyqtSignal(int, int)          # (slot_index, channel_id)
     fullscreen_requested = pyqtSignal()
+    viewport_changed = pyqtSignal(int)                 # slot_index (emitted on resize or zoom change)
+
+    # Pre-allocated colors, pens, and fonts to avoid per-frame allocations in paintEvent
+    _COLOR_BLACK = QColor("#000000")
+    _COLOR_BORDER_SELECTED = QColor(145, 42, 42, 150)
+    _COLOR_BORDER_NORMAL = QColor("#14171f")
+    _COLOR_DROP_FILL = QColor(224, 62, 62, 35)
+    _COLOR_ZOOM_FILL = QColor(224, 62, 62, 40)
+    _COLOR_RED = QColor("#e03e3e")
+    _COLOR_OSD_BAR = QColor(0, 0, 0, 175)
+    _COLOR_BADGE_BG = QColor("#1b212e")
+    _COLOR_BADGE_BORDER = QColor("#333d52")
+    _COLOR_BADGE_TEXT = QColor("#d0d8e8")
+    _COLOR_OSD_TEXT = QColor("#e8ecf2")
+    _COLOR_MAIN_TAG = QColor("#9ec5fe")
+    _COLOR_SUB_TAG = QColor("#a3cfbb")
+    _COLOR_STATE_IDLE = QColor("#768094")
+    _DOT_COLORS = {
+        "connected": QColor("#2ecc71"),
+        "connecting": QColor("#f39c12"),
+        "error": QColor("#e74c3c"),
+        "disconnected": QColor("#555d6d"),
+    }
+
+    _PEN_BORDER_SELECTED = QPen(_COLOR_BORDER_SELECTED, 1)
+    _PEN_BORDER_NORMAL = QPen(_COLOR_BORDER_NORMAL, 1)
+    _PEN_DROP_TARGET = QPen(_COLOR_RED, 2, Qt.PenStyle.DashLine)
+    _PEN_ZOOM_BOX = QPen(_COLOR_RED, 1, Qt.PenStyle.DashLine)
+    _PEN_BADGE_BORDER = QPen(_COLOR_BADGE_BORDER, 1)
+
+    _FONT_PLACEHOLDER_TITLE = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
+    _FONT_PLACEHOLDER_SUB = QFont("Segoe UI", 9)
+    _FONT_OSD_TITLE = QFont("Segoe UI", 9, QFont.Weight.DemiBold)
+    _FONT_BADGE = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
+    _FONT_META = QFont("Consolas", 8, QFont.Weight.Bold)
 
     def __init__(
         self,
@@ -104,6 +139,8 @@ class CameraTileWidget(QWidget):
 
         self.setMinimumSize(220, 140)
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -132,10 +169,13 @@ class CameraTileWidget(QWidget):
 
     def reset_zoom(self):
         """Reset digital zoom and restore normal cursor and full camera view."""
+        was_zoomed = self._zoom_norm_rect is not None
         self._zoom_selecting = False
         self._zoom_dragging = False
         self._zoom_norm_rect = None
         self.unsetCursor()
+        if was_zoomed:
+            self.viewport_changed.emit(self.slot_index)
         self.update()
 
     def _toggle_zoom_button(self):
@@ -189,7 +229,12 @@ class CameraTileWidget(QWidget):
         self.frame_width = width
         self.frame_height = height
         self.stream_type = stream_type
-        self.update()
+        if self._is_hovered:
+            self.update(0, 0, self.width(), 32)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.viewport_changed.emit(self.slot_index)
 
     def set_selected(self, selected: bool):
         if self.is_selected != selected:
@@ -302,6 +347,7 @@ class CameraTileWidget(QWidget):
                 self._zoom_norm_rect = QRectF(nx, ny, nw, nh)
                 self._zoom_selecting = False
                 self.unsetCursor()
+                self.viewport_changed.emit(self.slot_index)
             self.update()
             return
 
@@ -528,18 +574,17 @@ class CameraTileWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
         rect = self.rect()
-
-        # Pure black background (#000000) for all views
-        painter.fillRect(rect, QColor("#000000"))
 
         # Draw video frame if available (cropped to _zoom_norm_rect when digitally zoomed)
         if self._current_image is not None and not self._current_image.isNull():
             target_rect = self._compute_video_target_rect(rect)
+            # Only paint letterbox borders if video does not completely fill the viewport
+            if target_rect != rect:
+                painter.fillRect(rect, self._COLOR_BLACK)
+
             if self._zoom_norm_rect is not None:
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
                 iw = self._current_image.width()
                 ih = self._current_image.height()
                 sx = int(self._zoom_norm_rect.x() * iw)
@@ -548,22 +593,33 @@ class CameraTileWidget(QWidget):
                 sh = max(1, int(self._zoom_norm_rect.height() * ih))
                 src_rect = QRect(sx, sy, sw, sh)
                 painter.drawImage(target_rect, self._current_image, src_rect)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
             else:
-                painter.drawImage(target_rect, self._current_image)
-        elif self.channel_id > 0:
-            # Draw connecting/error status for views that have an active camera assigned
-            self._draw_placeholder(painter, rect)
+                # Worker thread already pre-scales via SIMD cv2.resize(INTER_LINEAR);
+                # only enable SmoothPixmapTransform if window is mid-resize
+                needs_scale = self._current_image.size() != target_rect.size()
+                if needs_scale:
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                    painter.drawImage(target_rect, self._current_image)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                else:
+                    painter.drawImage(target_rect.topLeft(), self._current_image)
+        else:
+            painter.fillRect(rect, self._COLOR_BLACK)
+            if self.channel_id > 0:
+                self._draw_placeholder(painter, rect)
 
         # Draw rubber-band selection rectangle while dragging digital zoom region
         if self._zoom_dragging:
             sel_rect = QRect(self._zoom_drag_start, self._zoom_drag_current).normalized()
-            painter.setBrush(QColor(224, 62, 62, 40))
-            painter.setPen(QPen(QColor("#e03e3e"), 1, Qt.PenStyle.DashLine))
+            painter.setBrush(self._COLOR_ZOOM_FILL)
+            painter.setPen(self._PEN_ZOOM_BOX)
             painter.drawRect(sel_rect)
             painter.setBrush(Qt.BrushStyle.NoBrush)
 
         # Auto-hide title bar: only draw when mouse is hovering anywhere inside this camera tile
         if self._is_hovered:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             self._draw_osd(painter, rect)
         else:
             self._selector_badge_rect = QRect()
@@ -572,16 +628,15 @@ class CameraTileWidget(QWidget):
 
         # Draw minimal, low-prominence 1px border around the tile (or prominent highlight when drag-hovered)
         if self._is_drop_target:
-            painter.setBrush(QColor(224, 62, 62, 35))
-            pen = QPen(QColor("#e03e3e"), 2, Qt.PenStyle.DashLine)
-            painter.setPen(pen)
+            painter.setBrush(self._COLOR_DROP_FILL)
+            painter.setPen(self._PEN_DROP_TARGET)
             painter.drawRect(rect.adjusted(1, 1, -2, -2))
         else:
-            border_color = QColor(145, 42, 42, 150) if self.is_selected else QColor("#14171f")
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            pen = QPen(border_color, 1)
-            painter.setPen(pen)
+            painter.setPen(self._PEN_BORDER_SELECTED if self.is_selected else self._PEN_BORDER_NORMAL)
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+        painter.end()
 
     def _draw_placeholder(self, painter: QPainter, rect: QRect):
         """Draw status info only when an assigned camera is connecting or has an error."""
@@ -590,8 +645,7 @@ class CameraTileWidget(QWidget):
 
         cx, cy = rect.center().x(), rect.center().y()
 
-        font_title = QFont("Segoe UI", 10, QFont.Weight.DemiBold)
-        painter.setFont(font_title)
+        painter.setFont(self._FONT_PLACEHOLDER_TITLE)
         painter.setPen(QColor("#555e70"))
         title_rect = QRect(rect.left() + 12, cy - 12, rect.width() - 24, 22)
         painter.drawText(
@@ -600,8 +654,7 @@ class CameraTileWidget(QWidget):
             f"CH{self.channel_id:02d} • {self.camera_name}",
         )
 
-        font_sub = QFont("Segoe UI", 9)
-        painter.setFont(font_sub)
+        painter.setFont(self._FONT_PLACEHOLDER_SUB)
         if self.state == "error":
             painter.setPen(QColor("#c94a4a"))
         elif self.state == "connecting":
@@ -720,14 +773,9 @@ class CameraTileWidget(QWidget):
             return
 
         # Active camera OSD bar (shown on hover)
-        painter.fillRect(bar_rect, QColor(0, 0, 0, 175))
+        painter.fillRect(bar_rect, self._COLOR_OSD_BAR)
 
-        dot_color = {
-            "connected": QColor("#2ecc71"),
-            "connecting": QColor("#f39c12"),
-            "error": QColor("#e74c3c"),
-            "disconnected": QColor("#555d6d"),
-        }.get(self.state, QColor("#555d6d"))
+        dot_color = self._DOT_COLORS.get(self.state, self._DOT_COLORS["disconnected"])
 
         painter.setBrush(dot_color)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -735,9 +783,8 @@ class CameraTileWidget(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         # Left text: Camera Channel & Name (+ ZOOM/SAVED state hint if active)
-        font = QFont("Segoe UI", 9, QFont.Weight.DemiBold)
-        painter.setFont(font)
-        painter.setPen(QColor("#e8ecf2"))
+        painter.setFont(self._FONT_OSD_TITLE)
+        painter.setPen(self._COLOR_OSD_TEXT)
         state_tag = ""
         if self._snap_flash_active:
             state_tag = "  [SNAPSHOT SAVED]"
@@ -757,26 +804,24 @@ class CameraTileWidget(QWidget):
         self._draw_magnifier_button(painter, zoom_rect)
 
         # Interactive "CHxx ▾" selector button in top-right corner
-        painter.setBrush(QColor("#1b212e"))
-        painter.setPen(QPen(QColor("#333d52"), 1))
+        painter.setBrush(self._COLOR_BADGE_BG)
+        painter.setPen(self._PEN_BADGE_BORDER)
         painter.drawRoundedRect(badge_rect, 3, 3)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        font_badge = QFont("Segoe UI", 8, QFont.Weight.DemiBold)
-        painter.setFont(font_badge)
-        painter.setPen(QColor("#d0d8e8"))
+        painter.setFont(self._FONT_BADGE)
+        painter.setPen(self._COLOR_BADGE_TEXT)
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"CH{self.channel_id:02d} ▾")
 
         # Stream resolution + FPS info to the left of the Snapshot button
-        font_meta = QFont("Consolas", 8, QFont.Weight.Bold)
-        painter.setFont(font_meta)
+        painter.setFont(self._FONT_META)
         if self.state == "connected" and self.frame_width > 0:
             stream_tag = "HD" if self.stream_type == "main" else "SD"
             meta_text = f"[{stream_tag}] {self.frame_width}x{self.frame_height} {self.fps:.0f}fps"
-            painter.setPen(QColor("#9ec5fe") if self.stream_type == "main" else QColor("#a3cfbb"))
+            painter.setPen(self._COLOR_MAIN_TAG if self.stream_type == "main" else self._COLOR_SUB_TAG)
         else:
             meta_text = self.state.upper()
-            painter.setPen(QColor("#768094"))
+            painter.setPen(self._COLOR_STATE_IDLE)
 
         right_offset = (bar_rect.right() - snap_rect.left()) + 8
         painter.drawText(

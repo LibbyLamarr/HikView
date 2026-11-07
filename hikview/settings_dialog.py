@@ -781,7 +781,12 @@ class SettingsDialog(QDialog):
         s_form.addRow("RTSP Transport Protocol:", self.combo_transport)
 
         self.chk_auto_substream = QCheckBox(
-            "Automatically use Sub-Stream (SD) in Multi-Camera Views and Main-Stream (HD) in Single / Focus View"
+            "Auto Stream Optimization: Sub-Stream in Multi-Camera Views, HD in Single/Focus View (Recommended)"
+        )
+        self.chk_auto_substream.setToolTip(
+            "Highly Recommended for optimal performance: Drastically reduces host CPU and memory usage\n"
+            "in multi-camera grid views while automatically switching to full crystal-clear HD whenever\n"
+            "any camera is maximized or viewed individually."
         )
         s_form.addRow("", self.chk_auto_substream)
 
@@ -840,7 +845,7 @@ class SettingsDialog(QDialog):
 
         lbl_header = QLabel(
             "<span style='font-size: 16px; font-weight: 700; color: #ffffff;'>HikView</span> "
-            "<span style='font-size: 13px; font-weight: 600; color: #e03e3e; padding-left: 6px;'>V1.0.1</span>"
+            "<span style='font-size: 13px; font-weight: 600; color: #e03e3e; padding-left: 6px;'>V1.0.2</span>"
         )
         lbl_header.setTextFormat(Qt.TextFormat.RichText)
         app_layout.addWidget(lbl_header)
@@ -860,7 +865,7 @@ class SettingsDialog(QDialog):
         meta_form.setContentsMargins(0, 6, 0, 0)
         meta_form.setSpacing(6)
 
-        lbl_version = QLabel("V1.0.1")
+        lbl_version = QLabel("V1.0.2")
         lbl_version.setStyleSheet("color: #ffffff; font-weight: 600;")
         meta_form.addRow("Version:", lbl_version)
 

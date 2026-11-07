@@ -3,16 +3,14 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
-$Version = "v1.0.1"
+$Version = "v1.0.2"
 $DistAppDir = Join-Path $ProjectRoot "dist\HikView"
 $ReleasesDir = Join-Path $ProjectRoot "releases"
 $AppIconPath = Join-Path $ProjectRoot "app_icon.ico"
 $CSC = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
-if (-not (Test-Path $DistAppDir)) {
-    Write-Host "Building HikView.exe with PyInstaller first..." -ForegroundColor Cyan
+Write-Host "Building HikView.exe with PyInstaller first..." -ForegroundColor Cyan
     pyinstaller --noconfirm --clean --windowed --icon "app_icon.ico" --add-data "app_icon.ico;." --name "HikView" main.py
-}
 
 if (-not (Test-Path $ReleasesDir)) {
     New-Item -ItemType Directory -Path $ReleasesDir | Out-Null
@@ -28,7 +26,7 @@ if (Test-Path $UninstallerPath) {
     Remove-Item $UninstallerPath -Force
 }
 
-# 2. Create Portable ZIP: releases\HikView-Portable-v1.0.1.zip
+# 2. Create Portable ZIP: releases\HikView-Portable-v1.0.2.zip
 $PortableZip = Join-Path $ReleasesDir "HikView-Portable-$Version.zip"
 if (Test-Path $PortableZip) {
     Remove-Item $PortableZip -Force
@@ -62,7 +60,7 @@ with zipfile.ZipFile(payload_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             zf.write(full, rel)
 "@
 
-# 5. Compile HikView-Setup-v1.0.1.exe with embedded payload
+# 5. Compile HikView-Setup-v1.0.2.exe with embedded payload
 $SetupExe = Join-Path $ReleasesDir "HikView-Setup-$Version.exe"
 if (Test-Path $SetupExe) {
     Remove-Item $SetupExe -Force
@@ -88,3 +86,4 @@ Write-Host " Release Build Complete!" -ForegroundColor Green
 Write-Host " 1. Installer : $SetupExe" -ForegroundColor Yellow
 Write-Host " 2. Portable  : $PortableZip" -ForegroundColor Yellow
 Write-Host "=========================================================" -ForegroundColor Green
+

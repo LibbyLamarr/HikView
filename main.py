@@ -7,17 +7,20 @@ import sys
 import os
 import ctypes
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 
+from hikview.logging_config import setup_logging
 from hikview.config import AppConfig
 from hikview.main_window import MainWindow, create_app_icon
 
 
 def main():
+    # Initialize application logging, stream redirection, and unhandled exception safety hooks
+    setup_logging()
+
     # Ensure crisp high-DPI scaling and Windows taskbar icon grouping
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hikview.nvr.viewer.1.0.1")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hikview.nvr.viewer.1.0.2")
     except Exception:
         pass
 

@@ -15,7 +15,7 @@ View and manage up to **16 cameras** from multiple NVRs and standalone IP camera
 ![Protocols](https://img.shields.io/badge/Protocols-RTSP%20%7C%20ONVIF-008B8B?style=flat-square)
 ![Cameras](https://img.shields.io/badge/Cameras-Up%20to%2016-7952B3?style=flat-square)
 [![License](https://img.shields.io/badge/License-MIT-F0A500?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/badge/Download-v1.0.1-43A047?style=flat-square)](https://github.com/LibbyLamarr/HikView/releases)
+[![Version](https://img.shields.io/badge/Download-v1.0.2-43A047?style=flat-square)](https://github.com/LibbyLamarr/HikView/releases)
 
 <br>
 
@@ -229,7 +229,7 @@ Prebuilt releases are available in two formats, allowing you to choose between a
 
 <div align="center">
 
-### [⬇️ Download HikView v1.0.0](https://github.com/LibbyLamarr/HikView/releases)
+### [⬇️ Download HikView v1.0.2](https://github.com/LibbyLamarr/HikView/releases)
 
 </div>
 
@@ -238,7 +238,7 @@ Prebuilt releases are available in two formats, allowing you to choose between a
 Best for regular desktop use.
 
 1. Visit the [GitHub Releases](https://github.com/LibbyLamarr/HikView/releases) page.
-2. Download **`HikView-Setup-v1.0.1.exe`**.
+2. Download **`HikView-Setup-v1.0.2.exe`**.
 3. Run the installer.
 4. Follow the installation instructions.
 5. Launch HikView using the Desktop or Start Menu shortcut.
@@ -253,7 +253,7 @@ C:\Program Files\HikView
 
 Ideal for users who prefer not to install additional software.
 
-1. Download **`HikView-Portable-v1.0.1.zip`** from GitHub Releases.
+1. Download **`HikView-Portable-v1.0.2.zip`** from GitHub Releases.
 2. Extract the ZIP archive to a folder of your choice.
 3. Open the extracted `HikView` folder.
 4. Run **`HikView.exe`**.
@@ -401,8 +401,8 @@ This produces the Windows installer and portable ZIP release packages:
 
 ```text
 releases\
-├── HikView-Setup-v1.0.1.exe
-└── HikView-Portable-v1.0.1.zip
+├── HikView-Setup-v1.0.2.exe
+└── HikView-Portable-v1.0.2.zip
 ```
 
 Build requirements and output may depend on the tools and dependencies configured in the project.
@@ -472,7 +472,7 @@ All product names, trademarks and registered trademarks mentioned in this projec
 
 ## 📄 License & Credits
 
-**HikView v1.0.1**
+**HikView v1.0.2**
 
 Developed and maintained by **[LibbyLamarr](https://github.com/LibbyLamarr)**.
 

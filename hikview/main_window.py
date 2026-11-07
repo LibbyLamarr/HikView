@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import cv2
-from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF, QSize
+from PyQt6.QtCore import Qt, QTimer, QPointF, QRectF, QSize, QEvent
 from PyQt6.QtGui import (
     QImage,
     QKeySequence,
@@ -503,6 +503,7 @@ class MainWindow(QMainWindow):
             tile.disconnect_requested.connect(self.stop_channel)
             tile.snapshot_requested.connect(self.take_snapshot)
             tile.fullscreen_requested.connect(self.toggle_fullscreen)
+            tile.viewport_changed.connect(self._on_tile_viewport_changed)
             self.tiles[slot_idx] = tile
 
         # Status Bar
@@ -567,10 +568,10 @@ class MainWindow(QMainWindow):
                     w = self.workers[cid]
                     tile.set_status("connected", f"LIVE ({w.stream_type.upper()})")
                     bgr = w.get_latest_frame()
-                    if bgr is not None:
-                        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                        h, width, ch = rgb.shape
-                        qimg = QImage(rgb.data, width, h, ch * width, QImage.Format.Format_RGB888).copy()
+                    if bgr is not None and len(bgr.shape) == 3 and bgr.shape[2] == 3:
+                        h, width, _ch = bgr.shape
+                        qimg = QImage(bgr.data, width, h, int(bgr.strides[0]), QImage.Format.Format_BGR888)
+                        qimg._frame_ref = bgr
                         tile.set_frame(qimg)
                 elif not self.is_streaming:
                     tile.clear_frame()
@@ -898,6 +899,48 @@ class MainWindow(QMainWindow):
         vis_count = self._visible_slot_count_for_mode(self.current_layout_mode)
         return {cid for cid in slot_list[:vis_count] if cid > 0}
 
+    def _on_tile_viewport_changed(self, slot_index: int):
+        """Sync target viewport dimensions with background workers when a tile resizes or zooms."""
+        self._sync_worker_target_sizes()
+        tile = self.tiles.get(slot_index)
+        if tile is not None and tile.channel_id > 0 and tile.get_zoom_norm_rect() is not None:
+            w = self.workers.get(tile.channel_id)
+            if w is not None:
+                bgr = w.get_latest_frame()
+                if bgr is not None and len(bgr.shape) == 3 and bgr.shape[2] == 3:
+                    h, width, _ch = bgr.shape
+                    qimg = QImage(bgr.data, width, h, int(bgr.strides[0]), QImage.Format.Format_BGR888)
+                    qimg._frame_ref = bgr
+                    tile.set_frame(qimg)
+
+    def _sync_worker_target_sizes(self):
+        """
+        Update each active RTSPStreamWorker with the maximum display viewport size of the
+        tile(s) showing its channel so frame scaling runs off-thread in C++.
+        """
+        if not self.workers:
+            return
+        vis_count = self._visible_slot_count_for_mode(self.current_layout_mode)
+        visible_slots = [self.selected_slot] if self.current_layout_mode == 1 else list(range(vis_count))
+
+        for cid, worker in self.workers.items():
+            max_w = 0
+            max_h = 0
+            any_zoomed = False
+            for s_idx in visible_slots:
+                t = self.tiles.get(s_idx)
+                if t is not None and t.channel_id == cid:
+                    max_w = max(max_w, t.width())
+                    max_h = max(max_h, t.height())
+                    if t.get_zoom_norm_rect() is not None:
+                        any_zoomed = True
+            worker.set_target_render_params(
+                width=max_w,
+                height=max_h,
+                maintain_aspect=self.config.maintain_aspect_ratio,
+                is_zoomed=any_zoomed,
+            )
+
     def _sync_workers_with_slots(self):
         """Ensure background stream workers are running for all assigned & enabled camera channels."""
         assigned_cids = self._get_assigned_channel_ids()
@@ -910,6 +953,8 @@ class MainWindow(QMainWindow):
             ch_cfg = self._get_channel_config(cid)
             if ch_cfg and ch_cfg.enabled and cid not in self.workers:
                 self._start_channel_worker(ch_cfg)
+
+        self._sync_worker_target_sizes()
 
     def start_all_streams(self):
         self.stop_all_streams()
@@ -936,12 +981,13 @@ class MainWindow(QMainWindow):
             transport=self.config.rtsp_transport,
             reconnect_interval=self.config.reconnect_interval_sec,
             camera_name=ch_cfg.name,
-            parent=self,
+            parent=None,
         )
         worker.frame_ready.connect(self._on_worker_frame)
         worker.status_changed.connect(self._on_worker_status)
         worker.stats_updated.connect(self._on_worker_stats)
         self.workers[cid] = worker
+        self._sync_worker_target_sizes()
         worker.start()
 
     def reconnect_channel(self, channel_id: int):
@@ -951,6 +997,13 @@ class MainWindow(QMainWindow):
             self.is_streaming = True
             self._update_power_button_appearance()
             self._start_channel_worker(ch_cfg)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            is_min = self.isMinimized()
+            for worker in self.workers.values():
+                worker.set_paused(is_min)
 
     def stop_channel(self, channel_id: int):
         worker = self.workers.pop(channel_id, None)
@@ -962,7 +1015,10 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             worker.stop()
-            worker.deleteLater()
+            if worker.isFinished():
+                worker.deleteLater()
+            else:
+                worker.finished.connect(worker.deleteLater)
         for tile in self.tiles.values():
             if tile.channel_id == channel_id:
                 tile.clear_frame()
@@ -979,8 +1035,13 @@ class MainWindow(QMainWindow):
         self._update_power_button_appearance()
 
     def _on_worker_frame(self, channel_id: int, qimg: QImage):
+        worker = self.workers.get(channel_id)
+        if worker is not None:
+            latest = worker.consume_latest_frame()
+            if latest is not None:
+                qimg = latest
         for tile in self.tiles.values():
-            if tile.channel_id == channel_id:
+            if tile.channel_id == channel_id and tile.isVisible():
                 tile.set_frame(qimg)
 
     def _on_worker_status(self, channel_id: int, state: str, message: str):
@@ -1111,5 +1172,23 @@ class MainWindow(QMainWindow):
         valid_codes = {code for _lbl, code in self.config.get_available_layouts()}
         self.config.default_layout = self.current_layout_mode if self.current_layout_mode in valid_codes else 4
         self.config.save()
-        self.stop_all_streams()
+
+        # Stop and cleanly wait for all background stream worker threads
+        active_workers = list(self.workers.values())
+        self.workers.clear()
+        for w in active_workers:
+            try:
+                w.frame_ready.disconnect()
+                w.status_changed.disconnect()
+                w.stats_updated.disconnect()
+            except Exception:
+                pass
+            w.stop()
+
+        for w in active_workers:
+            if w.isRunning():
+                w.wait(2000)
+            w.deleteLater()
+
+        self.is_streaming = False
         super().closeEvent(event)
