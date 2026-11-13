@@ -20,7 +20,7 @@ def main():
 
     # Ensure crisp high-DPI scaling and Windows taskbar icon grouping
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hikview.nvr.viewer.1.0.2")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hikview.nvr.viewer.1.0.3")
     except Exception:
         pass
 

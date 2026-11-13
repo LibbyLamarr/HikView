@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
-$Version = "v1.0.2"
+$Version = "v1.0.3"
 $DistAppDir = Join-Path $ProjectRoot "dist\HikView"
 $ReleasesDir = Join-Path $ProjectRoot "releases"
 $AppIconPath = Join-Path $ProjectRoot "app_icon.ico"

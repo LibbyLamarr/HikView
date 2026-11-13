@@ -7,6 +7,7 @@ per-tile Snapshot & Digital Zoom icons, vector toolbar icons, and pure black emp
 """
 
 import ctypes
+import logging
 import math
 import sys
 from datetime import datetime
@@ -197,6 +198,23 @@ class MainWindow(QMainWindow):
             self.config.nvr_host or any(ch.use_custom_host or ch.custom_rtsp_url for ch in self.config.channels)
         ):
             QTimer.singleShot(350, self.start_all_streams)
+
+        # Notify user if configuration was recovered from backup or if corruption occurred
+        if getattr(self.config, "_recovered_from_backup", False):
+            QTimer.singleShot(600, lambda: QMessageBox.information(
+                self,
+                "HikView — Configuration Recovered",
+                "Your camera configuration was automatically recovered from the backup file.\n\n"
+                "A previous shutdown or file corruption occurred, but your settings have been restored.",
+            ))
+        elif getattr(self.config, "_corruption_detected", False):
+            QTimer.singleShot(600, lambda: QMessageBox.warning(
+                self,
+                "HikView — Configuration Reset",
+                "HikView detected a corrupted configuration file.\n\n"
+                "A valid backup could not be found, so factory defaults have been loaded.\n"
+                "A copy of the damaged file was preserved in your AppData directory for safety.",
+            ))
 
     def _is_focus_layout(self, mode: Optional[int] = None) -> bool:
         m = self.current_layout_mode if mode is None else mode
@@ -852,12 +870,23 @@ class MainWindow(QMainWindow):
             return "sub"
 
     def _adjust_streams_for_layout(self):
+        """
+        Ensure streams match user preferences without interrupting active video playback.
+        If a stream is already connected and delivering frames, do not drop the RTSP connection
+        during layout changes so video continues seamlessly without black screens (identical to iVMS-4200).
+        Quality adjustments apply when streams start, on manual tile override, or via Settings.
+        """
         if not self.is_streaming:
             return
 
         for ch_cfg in self.config.channels:
             cid = ch_cfg.channel_id
             if cid not in self.workers:
+                continue
+
+            worker = self.workers[cid]
+            # If the worker is already active and streaming, do not tear down the connection on layout change
+            if worker.isRunning() and worker.get_latest_frame() is not None:
                 continue
 
             desired_stream = self._determine_stream_type(ch_cfg)
@@ -869,7 +898,6 @@ class MainWindow(QMainWindow):
                 stream_type=desired_stream,
                 url_style=self.config.url_style,
             )
-            worker = self.workers[cid]
             if worker.stream_type != desired_stream or worker.rtsp_url != url:
                 worker.update_stream_config(
                     rtsp_url=url,
@@ -890,14 +918,17 @@ class MainWindow(QMainWindow):
         else:
             self.start_all_streams()
 
-    def _get_assigned_channel_ids(self) -> Set[int]:
-        """Return only camera channel IDs that are currently assigned to visible layout slots."""
-        slot_list = self._active_slot_list()
-        if self.current_layout_mode == 1:
-            cid = slot_list[self.selected_slot]
-            return {cid} if cid > 0 else set()
-        vis_count = self._visible_slot_count_for_mode(self.current_layout_mode)
-        return {cid for cid in slot_list[:vis_count] if cid > 0}
+    def _get_active_channel_ids(self) -> Set[int]:
+        """
+        Return all camera channel IDs that should be streaming while surveillance is active.
+        Keeps all enabled layout channels streaming continuously in the background so that
+        switching between Full Screen, Single (1x1), and Multiview layouts is instantaneous
+        without dropping RTSP connections or reloading feeds (identical to iVMS-4200).
+        """
+        configured_cids = set(self.config.slot_assignments) | set(self.config.focus_slot_assignments)
+        enabled_cids = {ch.channel_id for ch in self.config.channels if ch.enabled}
+        assigned_enabled = {cid for cid in configured_cids if cid in enabled_cids and cid > 0}
+        return assigned_enabled if assigned_enabled else enabled_cids
 
     def _on_tile_viewport_changed(self, slot_index: int):
         """Sync target viewport dimensions with background workers when a tile resizes or zooms."""
@@ -942,14 +973,19 @@ class MainWindow(QMainWindow):
             )
 
     def _sync_workers_with_slots(self):
-        """Ensure background stream workers are running for all assigned & enabled camera channels."""
-        assigned_cids = self._get_assigned_channel_ids()
+        """
+        Ensure background stream workers are running for all active cameras.
+        Does not stop background cameras during layout transitions, ensuring continuous live streaming.
+        """
+        active_cids = self._get_active_channel_ids()
 
+        # Stop only channels that are no longer configured or have been disabled
         for running_cid in list(self.workers.keys()):
-            if running_cid not in assigned_cids:
+            if running_cid not in active_cids:
                 self.stop_channel(running_cid)
 
-        for cid in assigned_cids:
+        # Start workers for any configured active channels not yet streaming
+        for cid in active_cids:
             ch_cfg = self._get_channel_config(cid)
             if ch_cfg and ch_cfg.enabled and cid not in self.workers:
                 self._start_channel_worker(ch_cfg)
@@ -1171,9 +1207,12 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         valid_codes = {code for _lbl, code in self.config.get_available_layouts()}
         self.config.default_layout = self.current_layout_mode if self.current_layout_mode in valid_codes else 4
-        self.config.save()
+        try:
+            self.config.save()
+        except Exception as save_err:
+            logging.error("Failed to save configuration during window close: %s", save_err)
 
-        # Stop and cleanly wait for all background stream worker threads
+        # Stop and cleanly wait for all background stream worker threads concurrently
         active_workers = list(self.workers.values())
         self.workers.clear()
         for w in active_workers:
@@ -1183,11 +1222,11 @@ class MainWindow(QMainWindow):
                 w.stats_updated.disconnect()
             except Exception:
                 pass
-            w.stop()
+            w.request_stop()
 
         for w in active_workers:
             if w.isRunning():
-                w.wait(2000)
+                w.wait(250)
             w.deleteLater()
 
         self.is_streaming = False

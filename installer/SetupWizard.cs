@@ -9,13 +9,13 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("HikView V1.0.2 Setup")]
-[assembly: AssemblyDescription("HikView V1.0.2 Windows Installer")]
+[assembly: AssemblyTitle("HikView V1.0.3 Setup")]
+[assembly: AssemblyDescription("HikView V1.0.3 Windows Installer")]
 [assembly: AssemblyProduct("HikView")]
 [assembly: AssemblyCompany("LibbyLamarr")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 LibbyLamarr — MIT License")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace HikViewSetup
 {
@@ -35,7 +35,7 @@ namespace HikViewSetup
 
         public SetupForm()
         {
-            this.Text = "HikView V1.0.2 Setup";
+            this.Text = "HikView V1.0.3 Setup";
             try
             {
                 this.Icon = Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location);
@@ -68,7 +68,7 @@ namespace HikViewSetup
             headerPanel.Controls.Add(accentLine);
 
             Label lblTitle = new Label();
-            lblTitle.Text = "HikView V1.0.2 — Setup Wizard";
+            lblTitle.Text = "HikView V1.0.3 — Setup Wizard";
             lblTitle.Font = new Font("Segoe UI", 14f, FontStyle.Bold);
             lblTitle.ForeColor = Color.White;
             lblTitle.Location = new Point(20, 14);
@@ -142,7 +142,7 @@ namespace HikViewSetup
 
             // Progress section
             lblStatus = new Label();
-            lblStatus.Text = "Click 'Install' to install HikView V1.0.2 to your computer.";
+            lblStatus.Text = "Click 'Install' to install HikView V1.0.3 to your computer.";
             lblStatus.ForeColor = Color.FromArgb(154, 164, 184);
             lblStatus.Location = new Point(22, 278);
             lblStatus.Size = new Size(500, 22);
@@ -407,7 +407,7 @@ namespace HikViewSetup
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "HikView");
-                        key.SetValue("DisplayVersion", "1.0.2");
+                        key.SetValue("DisplayVersion", "1.0.3");
                         key.SetValue("Publisher", "LibbyLamarr");
                         key.SetValue("DisplayIcon", mainExe);
                         key.SetValue("InstallLocation", installDir);
@@ -446,7 +446,7 @@ namespace HikViewSetup
                 {
                     MessageBox.Show(
                         "Administrator privileges are required to install HikView into Program Files.",
-                        "HikView V1.0.2 Setup",
+                        "HikView V1.0.3 Setup",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning
                     );

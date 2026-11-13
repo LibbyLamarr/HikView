@@ -118,10 +118,15 @@ class RTSPStreamWorker(QThread):
                 return self._latest_bgr_frame.copy()
             return None
 
-    def stop(self):
-        """Signal the worker loop to exit cleanly."""
+    def request_stop(self):
+        """Signal the worker loop to exit without blocking the caller."""
         self._running = False
-        self.wait(1500)
+
+    def stop(self, wait_ms: int = 1500):
+        """Signal the worker loop to exit cleanly and wait up to wait_ms."""
+        self._running = False
+        if wait_ms > 0:
+            self.wait(wait_ms)
 
     def run(self):
         self._running = True

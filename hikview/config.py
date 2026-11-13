@@ -5,8 +5,11 @@ Standalone ONVIF/RTSP IP cameras), device brand presets, and dynamic UI layout p
 """
 
 import json
+import logging
 import os
+import shutil
 from dataclasses import dataclass, field, asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -295,23 +298,135 @@ class AppConfig:
         return layouts
 
     def save(self, path: Optional[Path] = None) -> None:
+        """
+        Atomically save configuration to disk with automatic backup rotation.
+        Writes to a temporary file first, flushes and syncs to disk, updates the
+        backup file (.bak), and then performs an atomic replace so config.json is
+        never corrupted or left empty even if the application is killed or powers down mid-write.
+        """
         target = path or (get_config_dir() / "config.json")
+        target_dir = target.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
+        backup = target.with_suffix(".json.bak")
+        temp_file = target.with_name(f"{target.stem}.tmp.{os.getpid()}")
+
         data = asdict(self)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass
+
+            # Before replacing target, if target exists and is non-empty, keep a backup
+            if target.exists() and target.stat().st_size > 0:
+                try:
+                    shutil.copy2(target, backup)
+                except Exception as bak_err:
+                    logging.warning("Could not update config backup %s: %s", backup, bak_err)
+
+            # Atomic replace (NTFS MoveFileExW with MOVEFILE_REPLACE_EXISTING)
+            os.replace(temp_file, target)
+        except Exception as e:
+            logging.error("Failed to safely save configuration to %s: %s", target, e)
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+            raise
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "AppConfig":
+        """
+        Robustly load configuration from disk with automated recovery.
+        If config.json is corrupted or empty:
+          1. Preserves the damaged file as config.corrupt_<timestamp>.json for diagnostics.
+          2. Recovers automatically from config.json.bak if available.
+          3. Only falls back to factory defaults if no valid config or backup exists.
+        """
         target = path or (get_config_dir() / "config.json")
-        if not target.exists():
-            cfg = cls()
-            cfg.save(target)
-            return cfg
+        backup = target.with_suffix(".json.bak")
+
+        def _try_parse(file_path: Path) -> Optional["AppConfig"]:
+            if not file_path.exists() or file_path.stat().st_size == 0:
+                return None
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    return None
+                valid_keys = cls.__dataclass_fields__.keys()
+                filtered = {k: v for k, v in data.items() if k in valid_keys}
+                return cls(**filtered)
+            except Exception as parse_err:
+                logging.error("Error reading configuration from %s: %s", file_path, parse_err)
+                return None
+
+        # Case 1: Primary configuration file exists
+        if target.exists():
+            cfg = _try_parse(target)
+            if cfg is not None:
+                # Valid config loaded. Ensure a backup exists as well.
+                if not backup.exists() or backup.stat().st_size == 0:
+                    try:
+                        shutil.copy2(target, backup)
+                    except Exception:
+                        pass
+                return cfg
+
+            # Primary file exists but failed to parse (empty or corrupted)
+            logging.critical("Primary configuration file at %s is corrupted or empty!", target)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            corrupt_dest = target.with_name(f"config.corrupt_{timestamp}.json")
+            try:
+                shutil.copy2(target, corrupt_dest)
+                logging.info("Preserved corrupted configuration file to: %s", corrupt_dest)
+            except Exception as preserve_err:
+                logging.warning("Could not preserve corrupted configuration: %s", preserve_err)
+
+            # Attempt recovery from backup file
+            if backup.exists():
+                logging.info("Attempting recovery from backup file: %s", backup)
+                recovered_cfg = _try_parse(backup)
+                if recovered_cfg is not None:
+                    logging.info("Successfully recovered configuration from backup.")
+                    setattr(recovered_cfg, "_recovered_from_backup", True)
+                    try:
+                        recovered_cfg.save(target)
+                    except Exception as save_err:
+                        logging.warning("Could not re-save recovered config to %s: %s", target, save_err)
+                    return recovered_cfg
+
+            # Both primary and backup failed
+            logging.error("No valid backup found. Initializing factory defaults.")
+            fallback_cfg = cls()
+            setattr(fallback_cfg, "_corruption_detected", True)
+            try:
+                fallback_cfg.save(target)
+            except Exception:
+                pass
+            return fallback_cfg
+
+        # Case 2: Primary file does not exist, but backup exists
+        if backup.exists():
+            logging.info("Config file missing at %s, attempting restore from %s", target, backup)
+            recovered_cfg = _try_parse(backup)
+            if recovered_cfg is not None:
+                setattr(recovered_cfg, "_recovered_from_backup", True)
+                try:
+                    recovered_cfg.save(target)
+                except Exception:
+                    pass
+                return recovered_cfg
+
+        # Case 3: Fresh install or no previous config
+        logging.info("No configuration found at %s. Creating initial defaults.", target)
+        new_cfg = cls()
         try:
-            with open(target, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            valid_keys = cls.__dataclass_fields__.keys()
-            filtered = {k: v for k, v in data.items() if k in valid_keys}
-            return cls(**filtered)
-        except Exception:
-            return cls()
+            new_cfg.save(target)
+        except Exception as init_err:
+            logging.warning("Could not save initial configuration: %s", init_err)
+        return new_cfg

@@ -9,8 +9,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("HikView Uninstaller")]
 [assembly: AssemblyProduct("HikView")]
 [assembly: AssemblyCompany("LibbyLamarr")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace HikViewUninstaller
 {
@@ -53,7 +53,7 @@ namespace HikViewUninstaller
             if (!silent)
             {
                 DialogResult dr = MessageBox.Show(
-                    "Are you sure you want to completely remove HikView V1.0.2 and all of its components?",
+                    "Are you sure you want to completely remove HikView V1.0.3 and all of its components?",
                     "Uninstall HikView",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question
@@ -110,7 +110,7 @@ namespace HikViewUninstaller
             if (!silent)
             {
                 MessageBox.Show(
-                    "HikView V1.0.2 has been uninstalled from your computer.",
+                    "HikView V1.0.3 has been uninstalled from your computer.",
                     "Uninstall Complete",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information
